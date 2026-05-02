@@ -3,10 +3,12 @@
 import customtkinter as ctk
 import threading
 import os
+import sys
 from tkinter import messagebox
 
 from lyrics_generator import generer_paroles, affiner_paroles
 from music_generator import generer_musique
+from melody_generator import generer_melodie
 from recorder import Enregistreur
 from post_prod import post_production_vocale, mixer_final
 from config import DEFAULT_LANGUAGE, DEFAULT_REVERB
@@ -19,15 +21,38 @@ state = {
     "vocal_path": None,
     "vocal_prod_path": None,
     "mix_path": None,
+    "melodie_path": None,
 }
 enregistreur = Enregistreur()
+
+
+def ouvrir_fichier_audio(path: str | None, label: str = "fichier"):
+    """Ouvre un fichier audio avec le lecteur par défaut du système."""
+    if not path or not os.path.exists(path):
+        messagebox.showinfo("Indisponible", f"Aucun {label} disponible.")
+        return
+
+    def _jouer():
+        try:
+            if sys.platform == "win32":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                import subprocess
+                subprocess.Popen(["open", path])
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", path])
+        except Exception as e:
+            messagebox.showerror("Erreur lecture", str(e))
+
+    threading.Thread(target=_jouer, daemon=True).start()
 
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("🎵 AI Music Studio")
-        self.geometry("900x700")
+        self.geometry("920x720")
         self.resizable(True, True)
         self._construire_ui()
 
@@ -50,7 +75,6 @@ class App(ctk.CTk):
     def _onglet_paroles(self):
         tab = self.tabs.tab("1. Paroles")
 
-        # Ligne style / thème / langue
         row = ctk.CTkFrame(tab, fg_color="transparent")
         row.pack(fill="x", pady=(10, 5))
 
@@ -70,16 +94,18 @@ class App(ctk.CTk):
         row.columnconfigure(0, weight=2)
         row.columnconfigure(1, weight=2)
 
-        ctk.CTkButton(
-            tab, text="✨ Générer les paroles", command=self._generer_paroles
-        ).pack(pady=5)
+        # Boutons sur une ligne
+        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_row.pack(pady=8)
+        ctk.CTkButton(btn_row, text="✨ Générer les paroles", command=self._generer_paroles).pack(side="left", padx=5)
+        ctk.CTkButton(btn_row, text="🎵 Générer mélodie guide", fg_color="#6A1B9A",
+                      hover_color="#4A148C", command=self._generer_melodie).pack(side="left", padx=5)
 
-        # Zone de texte paroles
-        self.paroles_text = ctk.CTkTextbox(tab, height=280)
+        self.paroles_text = ctk.CTkTextbox(tab, height=260)
         self.paroles_text.pack(fill="both", expand=True, pady=5)
 
         # Affinage
-        ctk.CTkLabel(tab, text="✏️ Affiner avec l'IA", anchor="w").pack(fill="x", pady=(8, 0))
+        ctk.CTkLabel(tab, text="✏️ Affiner avec l'IA", anchor="w").pack(fill="x", pady=(6, 0))
         affiner_row = ctk.CTkFrame(tab, fg_color="transparent")
         affiner_row.pack(fill="x", pady=3)
 
@@ -88,9 +114,7 @@ class App(ctk.CTk):
             placeholder_text='Ex: "rends le refrain plus accrocheur", "version plus sombre"...',
         )
         self.affiner_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        ctk.CTkButton(
-            affiner_row, text="Affiner", width=100, command=self._affiner_paroles
-        ).pack(side="right")
+        ctk.CTkButton(affiner_row, text="Affiner", width=100, command=self._affiner_paroles).pack(side="right")
 
         self.paroles_status = ctk.CTkLabel(tab, text="", text_color="gray")
         self.paroles_status.pack()
@@ -101,25 +125,19 @@ class App(ctk.CTk):
     def _onglet_musique(self):
         tab = self.tabs.tab("2. Musique")
 
-        ctk.CTkLabel(
-            tab,
-            text="Génère un instrumental à partir du style et thème définis à l'étape 1.",
-            text_color="gray",
-        ).pack(pady=(15, 5))
+        ctk.CTkLabel(tab, text="Génère un instrumental à partir du style et thème (étape 1).",
+                     text_color="gray").pack(pady=(15, 5))
 
-        ctk.CTkButton(
-            tab, text="🎹 Générer l'instrumental", command=self._generer_musique
-        ).pack(pady=10)
+        ctk.CTkButton(tab, text="🎹 Générer l'instrumental", command=self._generer_musique).pack(pady=10)
 
         self.musique_status = ctk.CTkLabel(tab, text="", text_color="gray")
         self.musique_status.pack()
-
         self.musique_path_label = ctk.CTkLabel(tab, text="", text_color="#4CAF50")
         self.musique_path_label.pack()
 
-        ctk.CTkButton(
-            tab, text="▶ Écouter l'instrumental", command=self._jouer_instrumental
-        ).pack(pady=5)
+        ctk.CTkButton(tab, text="▶ Écouter l'instrumental", command=lambda: ouvrir_fichier_audio(
+            state.get("instrumental_path"), "instrumental"
+        )).pack(pady=5)
 
     # ------------------------------------------------------------------ #
     # Onglet 3 — Enregistrement
@@ -127,34 +145,24 @@ class App(ctk.CTk):
     def _onglet_enregistrement(self):
         tab = self.tabs.tab("3. Enregistrement")
 
-        ctk.CTkLabel(
-            tab,
-            text="Enregistre ta voix. L'instrumental joue en fond si disponible.",
-            text_color="gray",
-        ).pack(pady=(15, 10))
-
-        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
-        btn_row.pack(pady=10)
+        ctk.CTkLabel(tab, text="Enregistre ta voix. L'instrumental joue en fond si disponible.",
+                     text_color="gray").pack(pady=(15, 10))
 
         self.btn_record = ctk.CTkButton(
-            btn_row,
-            text="⏺ Enregistrer",
-            fg_color="#E53935",
-            hover_color="#B71C1C",
-            width=160,
-            command=self._toggle_enregistrement,
+            tab, text="⏺ Commencer l'enregistrement",
+            fg_color="#E53935", hover_color="#B71C1C",
+            width=220, command=self._toggle_enregistrement,
         )
-        self.btn_record.pack(side="left", padx=10)
+        self.btn_record.pack(pady=10)
 
         self.record_status = ctk.CTkLabel(tab, text="En attente...", text_color="gray")
         self.record_status.pack(pady=5)
-
         self.record_path_label = ctk.CTkLabel(tab, text="", text_color="#4CAF50")
         self.record_path_label.pack()
 
-        ctk.CTkButton(
-            tab, text="▶ Réécouter l'enregistrement", command=self._jouer_vocal
-        ).pack(pady=5)
+        ctk.CTkButton(tab, text="▶ Réécouter l'enregistrement", command=lambda: ouvrir_fichier_audio(
+            state.get("vocal_path"), "enregistrement"
+        )).pack(pady=5)
 
     # ------------------------------------------------------------------ #
     # Onglet 4 — Post-production
@@ -162,46 +170,37 @@ class App(ctk.CTk):
     def _onglet_postprod(self):
         tab = self.tabs.tab("4. Post-prod")
 
-        ctk.CTkLabel(
-            tab,
-            text="EQ vocal · Compression · Reverb · Pitch correction",
-            text_color="gray",
-        ).pack(pady=(15, 10))
+        ctk.CTkLabel(tab, text="EQ vocal · Compression · Reverb · Pitch correction",
+                     text_color="gray").pack(pady=(15, 10))
 
         options_row = ctk.CTkFrame(tab, fg_color="transparent")
         options_row.pack(pady=5)
 
         ctk.CTkLabel(options_row, text="Reverb :").pack(side="left", padx=(0, 5))
-        self.reverb_var = ctk.CTkOptionMenu(
-            options_row, values=["small", "medium", "large"], width=120
-        )
+        self.reverb_var = ctk.CTkOptionMenu(options_row, values=["small", "medium", "large"], width=120)
         self.reverb_var.set(DEFAULT_REVERB)
         self.reverb_var.pack(side="left", padx=(0, 20))
 
         self.delay_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(options_row, text="Delay", variable=self.delay_var).pack(side="left")
 
-        ctk.CTkButton(
-            tab, text="🎛 Appliquer post-production", command=self._post_prod
-        ).pack(pady=10)
-
+        ctk.CTkButton(tab, text="🎛 Appliquer post-production", command=self._post_prod).pack(pady=10)
         self.postprod_status = ctk.CTkLabel(tab, text="", text_color="gray")
         self.postprod_status.pack()
 
-        ctk.CTkButton(
-            tab,
-            text="🎚 Mixer voix + instrumental",
-            fg_color="#1565C0",
-            hover_color="#0D47A1",
-            command=self._mixer,
-        ).pack(pady=10)
+        ctk.CTkButton(tab, text="▶ Écouter la voix post-produite", command=lambda: ouvrir_fichier_audio(
+            state.get("vocal_prod_path"), "voix post-produite"
+        )).pack(pady=5)
 
+        ctk.CTkButton(tab, text="🎚 Mixer voix + instrumental",
+                      fg_color="#1565C0", hover_color="#0D47A1",
+                      command=self._mixer).pack(pady=10)
         self.mix_status = ctk.CTkLabel(tab, text="", text_color="gray")
         self.mix_status.pack()
 
-        ctk.CTkButton(
-            tab, text="▶ Écouter le mix", command=self._jouer_mix
-        ).pack(pady=5)
+        ctk.CTkButton(tab, text="▶ Écouter le mix final", command=lambda: ouvrir_fichier_audio(
+            state.get("mix_path"), "mix final"
+        )).pack(pady=5)
 
     # ------------------------------------------------------------------ #
     # Onglet 5 — Export
@@ -218,15 +217,13 @@ class App(ctk.CTk):
         ctk.CTkRadioButton(fmt_row, text="WAV (lossless)", variable=self.format_var, value="WAV").pack(side="left", padx=15)
 
         ctk.CTkButton(tab, text="💾 Exporter", command=self._exporter).pack(pady=10)
-
         self.export_status = ctk.CTkLabel(tab, text="", text_color="gray")
         self.export_status.pack()
-
         self.export_path_label = ctk.CTkLabel(tab, text="", text_color="#4CAF50", wraplength=700)
         self.export_path_label.pack(pady=5)
 
     # ================================================================== #
-    # Callbacks (tournent dans des threads pour ne pas bloquer l'UI)
+    # Callbacks
     # ================================================================== #
 
     def _generer_paroles(self):
@@ -237,9 +234,7 @@ class App(ctk.CTk):
             messagebox.showwarning("Champs manquants", "Remplis le style et le thème.")
             return
         self._set_status(self.paroles_status, "⏳ Génération en cours...", "gray")
-        threading.Thread(
-            target=self._run_generer_paroles, args=(style, theme, langue), daemon=True
-        ).start()
+        threading.Thread(target=self._run_generer_paroles, args=(style, theme, langue), daemon=True).start()
 
     def _run_generer_paroles(self, style, theme, langue):
         try:
@@ -249,7 +244,7 @@ class App(ctk.CTk):
         except Exception as e:
             self.after(0, lambda: self._set_status(self.paroles_status, f"❌ {e}", "#E53935"))
 
-    def _afficher_paroles(self, texte):
+    def _afficher_paroles(self, texte: str):
         self.paroles_text.delete("1.0", "end")
         self.paroles_text.insert("1.0", texte)
 
@@ -261,12 +256,10 @@ class App(ctk.CTk):
             messagebox.showwarning("Aucune parole", "Génère des paroles d'abord.")
             return
         if not instruction:
-            messagebox.showwarning("Instruction manquante", "Décris ce que tu veux modifier.")
+            messagebox.showwarning("Instruction manquante", "Décris ce que tu veux modifier (ex: 'rends le refrain plus accrocheur').")
             return
         self._set_status(self.paroles_status, "⏳ Affinage en cours...", "gray")
-        threading.Thread(
-            target=self._run_affiner, args=(paroles, instruction, langue), daemon=True
-        ).start()
+        threading.Thread(target=self._run_affiner, args=(paroles, instruction, langue), daemon=True).start()
 
     def _run_affiner(self, paroles, instruction, langue):
         try:
@@ -274,15 +267,32 @@ class App(ctk.CTk):
             self.after(0, lambda: self._afficher_paroles(affinee))
             self.after(0, lambda: self._set_status(self.paroles_status, "✅ Paroles affinées", "#4CAF50"))
         except Exception as e:
-            self.after(0, lambda: self._set_status(self.paroles_status, f"❌ {e}", "#E53935"))
+            self.after(0, lambda: self._set_status(self.paroles_status, f"❌ Affinage échoué : {e}", "#E53935"))
+
+    def _generer_melodie(self):
+        paroles = self.paroles_text.get("1.0", "end").strip()
+        if not paroles:
+            messagebox.showwarning("Aucune parole", "Génère des paroles d'abord.")
+            return
+        style = self.style_var.get().strip() or "pop"
+        self._set_status(self.paroles_status, "⏳ Génération mélodie MIDI...", "gray")
+        threading.Thread(target=self._run_generer_melodie, args=(paroles, style), daemon=True).start()
+
+    def _run_generer_melodie(self, paroles, style):
+        try:
+            path = generer_melodie(paroles, style)
+            state["melodie_path"] = path
+            self.after(0, lambda: self._set_status(self.paroles_status, "✅ Mélodie générée — ouverture...", "#4CAF50"))
+            # Ouvre directement avec le lecteur MIDI Windows
+            self.after(500, lambda: ouvrir_fichier_audio(path, "mélodie"))
+        except Exception as e:
+            self.after(0, lambda: self._set_status(self.paroles_status, f"❌ Mélodie échouée : {e}", "#E53935"))
 
     def _generer_musique(self):
         style = self.style_var.get().strip() or "cinematic"
         theme = self.theme_var.get().strip() or "epic"
         self._set_status(self.musique_status, "⏳ Génération instrumentale...", "gray")
-        threading.Thread(
-            target=self._run_generer_musique, args=(style, theme), daemon=True
-        ).start()
+        threading.Thread(target=self._run_generer_musique, args=(style, theme), daemon=True).start()
 
     def _run_generer_musique(self, style, theme):
         try:
@@ -294,28 +304,22 @@ class App(ctk.CTk):
         except Exception as e:
             self.after(0, lambda: self._set_status(self.musique_status, f"❌ {e}", "#E53935"))
 
-    def _jouer_instrumental(self):
-        self._jouer_fichier(state.get("instrumental_path"), "instrumental")
-
     def _toggle_enregistrement(self):
         if not enregistreur.recording:
-            self.btn_record.configure(text="⏹ Stop", fg_color="#555", hover_color="#333")
+            self.btn_record.configure(text="⏹ Stop — Terminer l'enregistrement",
+                                      fg_color="#555", hover_color="#333")
             self._set_status(self.record_status, "🔴 Enregistrement en cours...", "#E53935")
             enregistreur.demarrer(instrumental_path=state.get("instrumental_path"))
         else:
             path = enregistreur.arreter()
-            self.btn_record.configure(
-                text="⏺ Enregistrer", fg_color="#E53935", hover_color="#B71C1C"
-            )
+            self.btn_record.configure(text="⏺ Commencer l'enregistrement",
+                                      fg_color="#E53935", hover_color="#B71C1C")
             if path:
                 state["vocal_path"] = path
                 self._set_status(self.record_status, "✅ Enregistrement sauvegardé", "#4CAF50")
                 self.record_path_label.configure(text=os.path.basename(path))
             else:
                 self._set_status(self.record_status, "⚠️ Aucun audio capturé", "orange")
-
-    def _jouer_vocal(self):
-        self._jouer_fichier(state.get("vocal_path"), "vocal")
 
     def _post_prod(self):
         if not state.get("vocal_path"):
@@ -324,9 +328,7 @@ class App(ctk.CTk):
         reverb = self.reverb_var.get()
         delay = self.delay_var.get()
         self._set_status(self.postprod_status, "⏳ Post-production en cours...", "gray")
-        threading.Thread(
-            target=self._run_post_prod, args=(reverb, delay), daemon=True
-        ).start()
+        threading.Thread(target=self._run_post_prod, args=(reverb, delay), daemon=True).start()
 
     def _run_post_prod(self, reverb, delay):
         try:
@@ -354,9 +356,6 @@ class App(ctk.CTk):
         except Exception as e:
             self.after(0, lambda: self._set_status(self.mix_status, f"❌ {e}", "#E53935"))
 
-    def _jouer_mix(self):
-        self._jouer_fichier(state.get("mix_path"), "mix")
-
     def _exporter(self):
         source = state.get("mix_path") or state.get("vocal_prod_path")
         if not source:
@@ -364,9 +363,7 @@ class App(ctk.CTk):
             return
         fmt = self.format_var.get()
         theme = self.theme_var.get().strip() or "track"
-        threading.Thread(
-            target=self._run_export, args=(source, fmt, theme), daemon=True
-        ).start()
+        threading.Thread(target=self._run_export, args=(source, fmt, theme), daemon=True).start()
 
     def _run_export(self, source, fmt, theme):
         try:
@@ -386,38 +383,11 @@ class App(ctk.CTk):
             else:
                 audio.export(output_path, format="wav")
 
-            self.after(0, lambda: self._set_status(self.export_status, f"✅ Exporté", "#4CAF50"))
+            self.after(0, lambda: self._set_status(self.export_status, "✅ Exporté", "#4CAF50"))
             self.after(0, lambda: self.export_path_label.configure(text=output_path))
         except Exception as e:
             self.after(0, lambda: self._set_status(self.export_status, f"❌ {e}", "#E53935"))
 
-    # ================================================================== #
-    # Utilitaires
-    # ================================================================== #
-
+    # ------------------------------------------------------------------ #
     def _set_status(self, label: ctk.CTkLabel, text: str, color: str):
         label.configure(text=text, text_color=color)
-
-    def _jouer_fichier(self, path: str | None, nom: str):
-        if not path or not os.path.exists(path):
-            messagebox.showinfo("Indisponible", f"Aucun fichier {nom} disponible.")
-            return
-        threading.Thread(target=self._play_audio, args=(path,), daemon=True).start()
-
-    @staticmethod
-    def _play_audio(path: str):
-        try:
-            import pygame
-            pygame.mixer.init()
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.play()
-        except ImportError:
-            # Fallback : playsound si pygame absent
-            try:
-                from playsound import playsound
-                playsound(path, block=False)
-            except Exception:
-                import subprocess
-                subprocess.Popen(["start", path], shell=True)
-        except Exception as e:
-            print(f"[player] Erreur lecture : {e}")
