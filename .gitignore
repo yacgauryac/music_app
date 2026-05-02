@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+generated/
+recordings/
+output/
+exports/
+assets/placeholder_beat.wav
